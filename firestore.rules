@@ -20,7 +20,7 @@ rules_version = '2';
 //     accounts/{accountId}/devices) may read/write that account's solves,
 //     friends and statistics. It can never touch another account's data
 //     because the account id is part of the document path.
-//   * The unlock key is stored in accounts/{accountId}/secret, which no
+//   * The unlock key is stored in accounts/{accountId}/secret/unlock, which no
 //     client can read directly — it is only consulted by the device-sign-in
 //     rule. The public account document holds no secrets.
 //   * usernames/ is a uniqueness registry: the document id IS the username,
@@ -35,7 +35,7 @@ rules_version = '2';
 //
 // Data structure (see js/firebase.js for the full explanation):
 //   accounts/{accountId}                 public profile + aggregate stats
-//   accounts/{accountId}/secret          { unlockKey } (rules-only read)
+//   accounts/{accountId}/secret/unlock   { unlockKey } (rules-only read)
 //   accounts/{accountId}/devices/{uid}   device authorisations
 //   accounts/{accountId}/solves/{id}     one doc per solve
 //   accounts/{accountId}/friends/{fid}   one-way friend entries
@@ -62,7 +62,7 @@ service cloud.firestore {
     }
 
     function secretDoc(accountId) {
-      return get(/databases/$(database)/documents/accounts/$(accountId)/secret);
+      return get(/databases/$(database)/documents/accounts/$(accountId)/secret/unlock);
     }
 
     // -----------------------------------------------------------------------
@@ -94,7 +94,7 @@ service cloud.firestore {
       // rule reads it. Only the original owner may create it (so the key is
       // set exactly once at account creation); any device may delete it when
       // deleting the account.
-      match /secret {
+      match /secret/{secretId} {
         allow get: if false;
         allow list: if false;
         allow create: if signedIn()

@@ -24,7 +24,7 @@
 *                              friend codes can be looked up and the Friends
 *                              Leaderboard can show friends' stats.
 *
-*   accounts/{accountId}/secret  The 4-digit unlock key. Never readable by
+*   accounts/{accountId}/secret/unlock  The 4-digit unlock key. Never readable by
 *                              clients — only the device-sign-in rule reads it
 *                              (rules get()/exists() bypass read rules).
 *                              Written exactly once at account creation.
@@ -67,12 +67,12 @@ import {
 // ---------------------------------------------------------------------------
 
 var firebaseConfig = {
-    apiKey: 'AIzaSyAao4Q90VL6D4AktWrllHa9Gi4hUUODA9Y',
-    authDomain: 'cubetimer-d7031.firebaseapp.com',
-    projectId: 'cubetimer-d7031',
-    storageBucket: 'cubetimer-d7031.firebasestorage.app',
-    messagingSenderId: '150262671469',
-    appId: '1:150262671469:web:244e10170d306cae777764'
+    apiKey: 'AIzaSyDlqWc13ODu8yuMpRjyp24pz7s9aEbpsRE',
+    authDomain: 'cubetimer2.firebaseapp.com',
+    projectId: 'cubetimer2',
+    storageBucket: 'cubetimer2.firebasestorage.app',
+    messagingSenderId: '923799449364',
+    appId: '1:923799449364:web:09f3350673c5ae75369c01'
 };
 
 // ---------------------------------------------------------------------------
@@ -306,6 +306,7 @@ function createAccount() {
         var code = generateFriendCode();
         var key = generateUnlockKey();
         var accId = code; // the friend code IS the account id
+        var batchDone = false;
 
         // 1) Username availability — the real guarantee is the document id
         //    itself (a second account can never create the same id).
@@ -336,8 +337,9 @@ function createAccount() {
             });
             return batch.commit();
         }).then(function () {
+            batchDone = true;
             // 3) Secret (its own commit so the device rule below can read it).
-            return setDoc(doc(db, 'accounts', accId, 'secret'), { unlockKey: key });
+            return setDoc(doc(db, 'accounts', accId, 'secret', 'unlock'), { unlockKey: key });
         }).then(function () {
             // 4) This device's authorisation. The owner is pre-authorised by
             //    the rules (its uid matches the account's ownerUid).
@@ -371,12 +373,26 @@ function createAccount() {
             setProfileStatus('Account created! Save your Friend Code and unlock key to sign in on other devices.', 'ok');
         }).catch(function (err) {
             setProfileBusy(false);
+            // Surface the real error so it can be diagnosed in DevTools.
+            console.error('[createAccount] failed:', err);
             if (err && err.code === 'username-taken') {
                 setProfileStatus('That username is already taken. Try another.', 'error');
                 return;
             }
-            // A failed batch can mean another account just claimed this
-            // username (or a friend-code collision) — re-check before retrying.
+            // Once the batch has committed, the account and username exist. A
+            // failure after that point (secret / device authorisation) is a
+            // permissions problem, NOT a username collision — reporting it as
+            // "username taken" (by re-checking the doc we just created) is wrong.
+            if (batchDone) {
+                if (err && err.code === 'permission-denied') {
+                    setProfileStatus('Account was created, but authorising this device failed. Publish the updated firestore.rules in the Firebase console, then log in with your Friend Code + unlock key.', 'error');
+                } else {
+                    setProfileStatus('Account was created, but finishing setup failed. Check your connection, then log in with your Friend Code + unlock key.', 'error');
+                }
+                return;
+            }
+            // The batch did not commit: distinguish a username race from a
+            // retryable error (friend-code collision or network blip).
             getDoc(doc(db, 'usernames', nameId)).then(function (snap) {
                 if (snap.exists()) {
                     setProfileStatus('That username is already taken. Try another.', 'error');
@@ -789,7 +805,7 @@ function deleteAccount() {
     }).then(function () {
         // Account + secret + username, while this device is still authorised.
         var batch = writeBatch(db);
-        batch.delete(doc(db, 'accounts', accId, 'secret'));
+        batch.delete(doc(db, 'accounts', accId, 'secret', 'unlock'));
         if (nameId) {
             batch.delete(doc(db, 'usernames', nameId));
         }
