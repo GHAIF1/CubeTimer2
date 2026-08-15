@@ -1,0 +1,163 @@
+rules_version = '2';
+
+// ===========================================================================
+// CubeTimer — Firestore Security Rules
+// ===========================================================================
+// HOW TO INSTALL:
+//   1. Firebase Console → your project → Firestore Database → Rules tab.
+//   2. Delete everything in the editor and paste this whole file.
+//   3. Click "Publish".
+//
+// What these rules do:
+//   * A user creates an ACCOUNT that is shared across devices. The account is
+//     identified by its Friend Code (the document id, e.g. "CUBE-1234").
+//   * On creation the user also receives a 4-digit unlock key. Anyone who
+//     knows the Friend Code AND the unlock key can sign in from another
+//     device: the client asks Firestore to add its anonymous auth uid to the
+//     account's device list, and these rules verify the submitted key against
+//     the account secret before allowing it.
+//   * Every device that has signed into an account (its uid is in
+//     accounts/{accountId}/devices) may read/write that account's solves,
+//     friends and statistics. It can never touch another account's data
+//     because the account id is part of the document path.
+//   * The unlock key is stored in accounts/{accountId}/secret, which no
+//     client can read directly — it is only consulted by the device-sign-in
+//     rule. The public account document holds no secrets.
+//   * usernames/ is a uniqueness registry: the document id IS the username,
+//     so two accounts can never claim the same name.
+//
+// KNOWN LIMITATION (inherited from the "4-digit key" requirement):
+//   * A 4-digit key has only 10 000 combinations and Firestore rules cannot
+//     rate-limit attempts, so a determined attacker could brute-force a key
+//     offline. This is a client-side timer with "for fun" leaderboards; the
+//     key keeps friends from casually opening each other's accounts, not a
+//     hardened credential. For stronger security use Firebase Auth directly.
+//
+// Data structure (see js/firebase.js for the full explanation):
+//   accounts/{accountId}                 public profile + aggregate stats
+//   accounts/{accountId}/secret          { unlockKey } (rules-only read)
+//   accounts/{accountId}/devices/{uid}   device authorisations
+//   accounts/{accountId}/solves/{id}     one doc per solve
+//   accounts/{accountId}/friends/{fid}   one-way friend entries
+//   usernames/{name}                     username → accountId uniqueness map
+// ===========================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // True when the caller's auth uid is in the given account's device list.
+    function isDevice(accountId) {
+      return exists(/databases/$(database)/documents/accounts/$(accountId)/devices/$(request.auth.uid));
+    }
+
+    function accountDoc(accountId) {
+      return get(/databases/$(database)/documents/accounts/$(accountId));
+    }
+
+    function secretDoc(accountId) {
+      return get(/databases/$(database)/documents/accounts/$(accountId)/secret);
+    }
+
+    // -----------------------------------------------------------------------
+    // Accounts: public profile + aggregate statistics.
+    // Readable by any signed-in user (friend lookup + friends leaderboard).
+    // Created by the future owner, updated by any signed-in device, deleted
+    // by any signed-in device. Identity fields can never be changed.
+    // -----------------------------------------------------------------------
+    match /accounts/{accountId} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+                    && request.resource.data.accountId == accountId
+                    && request.resource.data.friendCode == accountId
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      allow update: if signedIn()
+                    && isDevice(accountId)
+                    && request.resource.data.accountId == resource.data.accountId
+                    && request.resource.data.friendCode == resource.data.friendCode
+                    && request.resource.data.ownerUid == resource.data.ownerUid
+                    && request.resource.data.username == resource.data.username
+                    && request.resource.data.usernameLower == resource.data.usernameLower;
+
+      allow delete: if signedIn() && isDevice(accountId);
+
+      // The unlock key. Never readable by clients — only the device-sign-in
+      // rule reads it. Only the original owner may create it (so the key is
+      // set exactly once at account creation); any device may delete it when
+      // deleting the account.
+      match /secret {
+        allow get: if false;
+        allow list: if false;
+        allow create: if signedIn()
+                      && request.auth.uid == accountDoc(accountId).data.ownerUid;
+        allow update: if false;
+        allow delete: if signedIn() && isDevice(accountId);
+      }
+
+      // Device authorisations. A device signs in by creating its own entry
+      // and proving it knows the unlock key (the owner registers the same way
+      // at account creation). Devices can read their own entry and list the
+      // account's devices; any device can remove a device entry.
+      match /devices/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list: if signedIn() && isDevice(accountId);
+        allow create: if signedIn()
+                      && uid == request.auth.uid
+                      && request.resource.data.unlockKey == secretDoc(accountId).data.unlockKey;
+        allow update: if signedIn()
+                      && uid == request.auth.uid
+                      && request.resource.data.unlockKey == secretDoc(accountId).data.unlockKey;
+        allow delete: if signedIn()
+                      && (request.auth.uid == uid || isDevice(accountId));
+      }
+
+      // Solves: one document per solve, scoped to the account by its path.
+      // Only the account's devices can list, read, create or delete them.
+      match /solves/{solveId} {
+        allow get: if signedIn() && isDevice(accountId);
+        allow list: if signedIn() && isDevice(accountId);
+        allow create: if signedIn() && isDevice(accountId);
+        allow update: if false;
+        allow delete: if signedIn() && isDevice(accountId);
+      }
+
+      // Friends: one-way entries; the document id is the friend's account id.
+      match /friends/{friendAccountId} {
+        allow read: if signedIn() && isDevice(accountId);
+        allow create: if signedIn()
+                      && isDevice(accountId)
+                      && friendAccountId != accountId
+                      && exists(/databases/$(database)/documents/accounts/$(friendAccountId));
+        allow update: if false;
+        allow delete: if signedIn() && isDevice(accountId);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Username registry: the document id is the lowercased username, so two
+    // accounts can never claim the same name (a second create is rejected).
+    // Docs may be created once by any signed-in user and never updated or
+    // listed. A device of the owning account may delete the entry when the
+    // account is deleted. Reads are allowed per-document so a username's
+    // availability can be checked.
+    // -----------------------------------------------------------------------
+    match /usernames/{name} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+                    && request.resource.data.name == name;
+      allow update: if false;
+      allow delete: if signedIn()
+                    && (resource == null || isDevice(resource.data.accountId));
+    }
+  }
+}
