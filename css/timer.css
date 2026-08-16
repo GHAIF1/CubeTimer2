@@ -1088,6 +1088,25 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
+.online-code-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    padding: 0.15rem;
+    color: var(--ct-muted);
+    font-size: 0.8rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.online-code-copy:hover,
+.online-code-copy:focus {
+    color: var(--ct-accent);
+}
+
 .online-user-stats {
     margin: 0.9rem 0 1.1rem;
     color: var(--ct-muted);

@@ -14,8 +14,8 @@
 
     var STORAGE_KEY = 'cubeTimer.solves';
     var WELCOME_KEY = 'cubeTimer.welcomeSeen';
-    // Official WCA 3x3x3 single world record: Max Park, 3.13 s (June 2023)
-    var WR_MS = 3130;
+    // Official WCA 3x3x3 single world record: 2.76 s
+    var WR_MS = 2760;
     var RECENT_COUNT = 5;
     var LEADERBOARD_COUNT = 10;
 

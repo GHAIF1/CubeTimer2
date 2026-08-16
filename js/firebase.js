@@ -1202,10 +1202,12 @@ function renderProfile() {
     var codeRow = makeEl('div', 'online-code-row');
     codeRow.appendChild(makeEl('span', 'online-code-label', 'Friend Code: '));
     codeRow.appendChild(makeEl('span', 'online-code', profile.friendCode));
+    codeRow.appendChild(copyIconBtn('Copy friend code', copyFriendCode));
 
     var keyRow = makeEl('div', 'online-code-row');
     keyRow.appendChild(makeEl('span', 'online-code-label', 'Unlock Key: '));
     keyRow.appendChild(makeEl('span', 'online-code', profile.unlockKey || '—'));
+    keyRow.appendChild(copyIconBtn('Copy unlock key', copyUnlockKey));
 
     user.appendChild(name);
     user.appendChild(codeRow);
@@ -1220,8 +1222,6 @@ function renderProfile() {
     box.appendChild(statsLine);
 
     var actions = makeEl('div', 'online-actions');
-    actions.appendChild(button('online-btn', 'Copy Code', copyFriendCode));
-    actions.appendChild(button('online-btn', 'Copy Key', copyUnlockKey));
     actions.appendChild(button('online-btn', 'Add Friend', toggleAddFriend));
     actions.appendChild(button('online-btn ghost', 'Log Out', logout));
     box.appendChild(actions);
@@ -1456,6 +1456,19 @@ function button(cls, text, handler) {
     b.type = 'button';
     b.className = cls;
     b.textContent = text;
+    b.addEventListener('click', handler);
+    return b;
+}
+
+function copyIconBtn(label, handler) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'online-code-copy';
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    var icon = document.createElement('i');
+    icon.className = 'fas fa-copy';
+    b.appendChild(icon);
     b.addEventListener('click', handler);
     return b;
 }
